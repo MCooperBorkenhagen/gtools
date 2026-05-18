@@ -6,9 +6,12 @@ from pathlib import Path, PurePath
 from google.cloud.storage import client, Blob, Bucket, transfer_manager
 from gtools.datastructs import ModelInfo, ModelState
 
+class DataContractError(Exception):
+    pass
+
 def _build_model_info(data: dict[Any]):
     try:
-        wandb_id = int(data['wandb_id'])
+        wandb_id = str(data['wandb_id'])
         lesion_start_epoch = int(data['lesion_start_epoch'])
         lesion_type = str(data['lesion_type'])
         model_type = str(data['model_type'])
@@ -28,7 +31,7 @@ def _build_model_info(data: dict[Any]):
         name = str(data['name'])
         bucket_name = str(data['bucket_name'])
     except (KeyError, ValueError) as e:
-        raise e
+        raise DataContractError from e
 
     return ModelInfo(
         wandb_id=wandb_id,

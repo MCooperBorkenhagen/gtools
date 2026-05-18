@@ -5,7 +5,7 @@ import tensorflow as tf
 
 @dataclass(frozen=True)
 class ModelInfo:
-    wandb_id: int
+    wandb_id: str
     lesion_start_epoch: int
     lesion_type: str
     model_type: str
