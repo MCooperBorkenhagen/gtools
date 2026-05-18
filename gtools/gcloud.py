@@ -1,10 +1,56 @@
 import pickle
 import json
-from collections import namedtuple
+from typing import Union, List, Any
 from collections.abc import Iterable
 from pathlib import Path, PurePath
 from google.cloud.storage import client, Blob, Bucket, transfer_manager
 from gtools.datastructs import ModelInfo, ModelState
+
+def _build_model_info(data: dict[Any]):
+    try:
+        wandb_id = int(data['wandb_id'])
+        lesion_start_epoch = int(data['lesion_start_epoch'])
+        lesion_type = str(data['lesion_type'])
+        model_type = str(data['model_type'])
+        run_name = str(data['run_name'])
+        train_data = str(data['train_data'])
+        test_data = [str(x) for x in data['test_data']]
+        mask_value = int(data['mask_value'])
+        lstm_units = int(data['lstm_units'])
+        learning_rate = float(data['learning_rate'])
+        batch_size = int(data['batch_size'])
+        frequency_scale_k = float(data['frequency_scale_k'])
+        epochs = int(data['epochs'])
+        seed = int(data['seed'])
+        orth_features = int(data['orth_features'])
+        phon_features = int(data['phon_features'])
+        phon_max_length = int(data['phon_max_length'])
+        name = str(data['name'])
+        bucket_name = str(data['bucket_name'])
+    except (KeyError, ValueError) as e:
+        raise e
+
+    return ModelInfo(
+        wandb_id=wandb_id,
+        lesion_start_epoch=lesion_start_epoch,
+        lesion_type=lesion_type,
+        model_type=model_type,
+        run_name=run_name, 
+        train_data=train_data,
+        test_data=test_data,
+        mask_value=mask_value,
+        lstm_units=lstm_units,
+        learning_rate=learning_rate,
+        batch_size=batch_size,
+        frequency_scale_k=frequency_scale_k,
+        epochs=epochs,
+        seed=seed,
+        orth_features=orth_features,
+        phon_features=phon_features,
+        phon_max_length=phon_max_length,
+        name=name,
+        bucket_name=bucket_name
+    )
 
 
 def ModelInfoFromBlob(blob: Blob) -> ModelInfo:
@@ -14,10 +60,10 @@ def ModelInfoFromBlob(blob: Blob) -> ModelInfo:
     x["name"] = blob.name
     x["bucket_name"] = Path(blob.bucket.path).name
     
-    return ModelInfo._make(x[field] for field in ModelInfo._fields)
+    return _build_model_info(x)
 
 
-def path_relative_to_bucket_name(file: Path, bucket_name: str = None):
+def path_relative_to_bucket_name(file: Path, bucket_name: Union[str, None] = None):
     if bucket_name is None:
         return file
     
@@ -27,14 +73,14 @@ def path_relative_to_bucket_name(file: Path, bucket_name: str = None):
     return str(Path(file).relative_to(bucket_root))
 
     
-def ModelInfoFromFile(file: Path, bucket_name: str = None) -> ModelInfo:
+def ModelInfoFromFile(file: Path, bucket_name: Union[str, None] = None) -> ModelInfo:
     with open(file, mode="r") as f:
         x = json.load(f)
 
     x["name"] = path_relative_to_bucket_name(file, bucket_name)
     x["bucket_name"] = bucket_name
     
-    return ModelInfo._make(x[field] for field in ModelInfo._fields)
+    return _build_model_info(x)
 
 
 def ModelStateFromBlob(blob: Blob) -> ModelState:
@@ -48,7 +94,7 @@ def ModelStateFromBlob(blob: Blob) -> ModelState:
 
 
 def ModelStateFromFile(file: Path, bucket_name: str) -> ModelState:
-    with open(mode="rb") as f:
+    with file.open(mode="rb") as f:
         x = pickle.load(f)
 
     x["name"] = path_relative_to_bucket_name(file, bucket_name)
@@ -57,28 +103,28 @@ def ModelStateFromFile(file: Path, bucket_name: str) -> ModelState:
     return ModelState._make(x[field] for field in ModelState._fields)
 
 
-def BlobToFile(blob: Blob, destination_directory: Path = "") -> None:
-    filename = Path(destination_directory) / Path(blob.bucket.path).name / Path(blob.name)
+def BlobToFile(blob: Blob, destination_directory: Path = Path('.')) -> None:
+    filename = destination_directory / Path(blob.bucket.path).name / Path(blob.name)
     filename.parent.mkdir(parents=True, exist_ok=True)
     blob.download_to_filename(filename)
 
 
-def ModelStateToFile(model_state: ModelState, bucket_name: str, destination_directory: Path = "") -> None:
-    filename = Path(destination_directory) / Path(bucket_name) / Path(model_state.name)
+def ModelStateToFile(model_state: ModelState, bucket_name: str, destination_directory: Path = Path('.')) -> None:
+    filename = Path(destination_directory) / bucket_name / model_state.name
     filename.parent.mkdir(parents=True, exist_ok=True)
     with open(filename, "wb") as f:
         pickle.dump({key: val for key,val in model_state._asdict().items() if key != "name"}, f)
 
 
-def ModelInfoToFile(model_info: ModelInfo, bucket_name: str, destination_directory: Path = "") -> None:
-    filename = Path(destination_directory) / Path(bucket_name) / Path(model_info.name)
+def ModelInfoToFile(model_info: ModelInfo, bucket_name: str, destination_directory: Path = Path('.')) -> None:
+    filename = Path(destination_directory) / bucket_name / model_info.name
     filename.parent.mkdir(parents=True, exist_ok=True)
     with open(filename, "w") as f:
         json.dump({key: val for key,val in model_info._asdict().items() if key != "name"},
                   f, ensure_ascii=False, indent=4)
 
 
-def list_model_info_blobs(bucket: Bucket, run_name: str, as_list=True) -> list[Blob]:
+def list_model_info_blobs(bucket: Bucket, run_name: str, as_list=True) -> List[Blob]:
     pattern = PurePath(run_name, "*", "config.json")
     blobs = bucket.list_blobs(match_glob=pattern)
 
@@ -87,11 +133,11 @@ def list_model_info_blobs(bucket: Bucket, run_name: str, as_list=True) -> list[B
     else:
         return blobs
 
-def sort_modelinfo_by_lesion_onset(model_info: list[ModelInfo]) -> list[ModelInfo]:
+def sort_modelinfo_by_lesion_onset(model_info: list[ModelInfo]) -> List[ModelInfo]:
     return sorted(model_info, key=lambda x: x.lesion_start_epoch)
 
 
-def list_model_info(bucket: Bucket, run_name: str, sorted=True) -> list[ModelInfo]:
+def list_model_info(bucket: Bucket, run_name: str, sorted=True) -> List[ModelInfo]:
     pattern = PurePath(run_name, "*", "config.json")
     model_info = [ModelInfoFromBlob(blob)
                   for blob
@@ -101,7 +147,7 @@ def list_model_info(bucket: Bucket, run_name: str, sorted=True) -> list[ModelInf
 
     return model_info
 
-def list_model_info_path(path: Path, sorted=True) -> list[ModelInfo]:
+def list_model_info_path(path: Path, sorted=True) -> List[ModelInfo]:
     if not isinstance(path, PurePath):
         path = Path(path)
 
@@ -115,7 +161,7 @@ def list_model_info_path(path: Path, sorted=True) -> list[ModelInfo]:
     return model_info
 
 
-def sort_epochs(epoch_blobs: list[Blob]) -> list[Blob]:
+def sort_epochs(epoch_blobs: List[Blob]) -> List[Blob]:
     def extract_epoch_count(blob: Blob) -> int:
         return int(PurePath(blob.name).name.replace(".","_").split("_")[1])
 
@@ -136,7 +182,7 @@ def list_epoch_blobs(bucket: Bucket, run_name:str, wandb_id: str, sorted=True, a
         return blobs
 
 
-def list_epochs(bucket: Bucket, run_name: str, wandb_id: str, sorted=True) -> list[ModelState]:
+def list_epochs(bucket: Bucket, run_name: str, wandb_id: str, sorted=True) -> List[ModelState]:
     return [ModelStateFromBlob(blob)
             for blob in list_epoch_blobs(bucket, run_name, wandb_id, sorted)]
 
